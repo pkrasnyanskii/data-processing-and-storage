@@ -1,0 +1,76 @@
+plugins {
+    id 'java'
+}
+
+group = 'org.example'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    lombokVersion = '1.18.48'
+    bouncyCastleVersion = '1.78.1'
+}
+
+dependencies {
+    compileOnly "org.projectlombok:lombok:${lombokVersion}"
+    annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+    testCompileOnly "org.projectlombok:lombok:${lombokVersion}"
+    testAnnotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+
+    implementation "org.bouncycastle:bcprov-jdk18on:${bouncyCastleVersion}"
+    implementation "org.bouncycastle:bcpkix-jdk18on:${bouncyCastleVersion}"
+
+    testImplementation platform('org.junit:junit-bom:6.0.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    maxHeapSize = '512m'
+}
+
+def cliArgs = { ->
+    if (!project.hasProperty('args')) {
+        return []
+    }
+    String raw = project.property('args') as String
+    def matcher = raw =~ /"([^"]*)"|(\S+)/
+    def tokens = []
+    while (matcher.find()) {
+        tokens << (matcher.group(1) != null ? matcher.group(1) : matcher.group(2))
+    }
+    return tokens
+}
+
+tasks.register('runCaKeyGen', JavaExec) {
+    group = 'application'
+    description = 'Generates the CA private key + self-signed certificate. ' +
+            'PowerShell: ./gradlew runCaKeyGen --args=\'ca.key ca.crt "My Course CA"\'  ' +
+            '(bash: ./gradlew runCaKeyGen --args="ca.key ca.crt \\"My Course CA\\"")'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j1.tools.GenerateCaKey'
+    args = cliArgs()
+}
+
+tasks.register('runServer', JavaExec) {
+    group = 'application'
+    description = 'Starts the RSA key-generation microservice. ' +
+            'PowerShell: ./gradlew runServer --args=\'--port 9090 --threads 4 --ca-key ca.key --issuer "My Course CA"\'  ' +
+            '(bash: ./gradlew runServer --args="--port 9090 --threads 4 --ca-key ca.key --issuer \\"My Course CA\\"")'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j1.server.KeyServerMain'
+    args = cliArgs()
+    standardInput = System.in
+}
+
+tasks.register('runClient', JavaExec) {
+    group = 'application'
+    description = 'Runs the key-generation client. Usage: ./gradlew runClient --args="--name alice --host localhost --port 9090"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j1.client.KeyClientMain'
+    args = cliArgs()
+}
