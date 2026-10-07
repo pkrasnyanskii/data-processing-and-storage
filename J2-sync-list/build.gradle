@@ -1,0 +1,76 @@
+plugins {
+    id 'java'
+}
+
+group = 'org.example'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    lombokVersion = '1.18.48'
+}
+
+dependencies {
+    compileOnly "org.projectlombok:lombok:${lombokVersion}"
+    annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+    testCompileOnly "org.projectlombok:lombok:${lombokVersion}"
+    testAnnotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+
+    testImplementation platform('org.junit:junit-bom:6.0.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+def cliArgs = { ->
+    if (!project.hasProperty('args')) {
+        return []
+    }
+    String raw = project.property('args') as String
+    def matcher = raw =~ /"([^"]*)"|(\S+)/
+    def tokens = []
+    while (matcher.find()) {
+        tokens << (matcher.group(1) != null ? matcher.group(1) : matcher.group(2))
+    }
+    return tokens
+}
+
+// без этого на Windows дочерний JVM может выбрать не-UTF8 кодировку для своих потоков
+// ещё до того, как успеет отработать System.setOut() внутри main() — см. README, раздел
+// "Кириллица в консоли на Windows"
+def consoleEncodingArgs = ['-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8', '-Dfile.encoding=UTF-8']
+
+tasks.register('runCustom', JavaExec) {
+    group = 'application'
+    description = 'Интерактивный режим на собственном связном списке. Пример: ./gradlew runCustom --args="--impl custom --threads 3 --within-delay 300 --between-delay 700"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j2.app.Main'
+    args = cliArgs()
+    standardInput = System.in
+    jvmArgs = consoleEncodingArgs
+}
+
+tasks.register('runSync', JavaExec) {
+    group = 'application'
+    description = 'Интерактивный режим на Collections.synchronizedList. Пример: ./gradlew runSync --args="--impl sync --threads 3 --within-delay 300 --between-delay 700"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j2.app.Main'
+    args = cliArgs()
+    standardInput = System.in
+    jvmArgs = consoleEncodingArgs
+}
+
+tasks.register('runBenchmark', JavaExec) {
+    group = 'application'
+    description = 'Headless замер числа шагов. Пример: ./gradlew runBenchmark --args="--impl custom --threads 4 --within-delay 50 --between-delay 50 --benchmark --duration-seconds 10"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.j2.app.Main'
+    args = cliArgs()
+    jvmArgs = consoleEncodingArgs
+}
