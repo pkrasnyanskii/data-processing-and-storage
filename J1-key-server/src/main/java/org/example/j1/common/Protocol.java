@@ -8,6 +8,11 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
+// Свой формат обмена байтами, в задании он не задан:
+//   запрос:  ASCII-имя + нулевой байт-терминатор
+//   ответ:   1 байт статуса, дальше либо
+//     OK:    int32 длина + PEM сертификата, int32 длина + PEM ключа
+//     ERROR: int32 длина + текст ошибки
 public final class Protocol {
 
     public static final byte STATUS_OK = 1;

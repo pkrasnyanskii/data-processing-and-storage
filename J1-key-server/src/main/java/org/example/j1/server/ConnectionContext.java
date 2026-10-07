@@ -5,6 +5,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
+// Состояние одного соединения, висит на его SelectionKey. Трогает это только нить реактора —
+// синхронизация не нужна.
 final class ConnectionContext {
 
     final SocketChannel channel;
@@ -24,6 +26,8 @@ final class ConnectionContext {
         return nameComplete;
     }
 
+    // Докармливаем пришедшие байты; возвращаем имя, когда встретили нулевой байт-терминатор,
+    // иначе null — имя может приехать не за один read, а по кускам.
     String feedNameBytes(ByteBuffer readBuf) throws java.io.IOException {
         while (readBuf.hasRemaining()) {
             byte b = readBuf.get();

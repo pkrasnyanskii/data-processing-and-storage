@@ -26,6 +26,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 
+// Выполняется в нити GenerationWorkerPool, никогда в реакторе — issue() это тяжёлая
+// по CPU генерация RSA + подпись, ей нельзя находиться на нити сетевого ввода-вывода.
 public final class CertificateAuthority implements CredentialIssuer {
 
     private static final String SIGNATURE_ALGORITHM = "SHA256withRSA";
@@ -61,6 +63,7 @@ public final class CertificateAuthority implements CredentialIssuer {
         return generator.generateKeyPair();
     }
 
+    // Собираем и подписываем X.509-сертификат приватным ключом CA (SHA256withRSA).
     private X509Certificate signCertificate(String subjectName, KeyPair subjectKeyPair) {
         X500Name subject = new X500Name("CN=" + subjectName);
         BigInteger serial = new BigInteger(128, secureRandom).abs();
@@ -71,6 +74,8 @@ public final class CertificateAuthority implements CredentialIssuer {
         X509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 issuer, serial, notBefore, notAfter, subject, subjectKeyPair.getPublic());
         try {
+            // cA=false + digitalSignature/keyEncipherment — обычный конечный сертификат,
+            // подписывать чужие сертификаты ему запрещено.
             certBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
             certBuilder.addExtension(Extension.keyUsage, true,
                     new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));

@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CompletableFuture;
 
+// Реактор в одной нити: только она трогает Selector, сокеты и ConnectionContext.
+// Генерирующие нити сюда не лезут напрямую — только через transmitQueue (потокобезопасная) + wakeup().
 public final class NioKeyServer implements AutoCloseable {
 
     private final ServerSocketChannel serverChannel;
@@ -32,19 +34,20 @@ public final class NioKeyServer implements AutoCloseable {
         this.workerPool = new GenerationWorkerPool(config.getGeneratorThreads(), issuer);
     }
 
+    // Блокируется здесь, пока shutdown() не выставит running = false и не разбудит selector.
     public void run() throws IOException {
         System.out.println("Key server listening on port " + localPort()
                 + " with " + "generator pool ready");
         while (running) {
-            selector.select();
+            selector.select(); // спит, пока какой-то канал не готов или кто-то не позвал wakeup()
 
-            drainTransmitQueue();
+            drainTransmitQueue(); // забираем ответы, которые генерирующие нити успели подготовить пока спали
 
             Set<SelectionKey> selectedKeys = selector.selectedKeys();
             Iterator<SelectionKey> it = selectedKeys.iterator();
             while (it.hasNext()) {
                 SelectionKey key = it.next();
-                it.remove();
+                it.remove(); // обязательно: select() сам это множество не чистит
                 try {
                     if (!key.isValid()) {
                         continue;
@@ -60,6 +63,7 @@ public final class NioKeyServer implements AutoCloseable {
                         }
                     }
                 } catch (IOException e) {
+                    // один упавший/сломанный клиент, остальных это не касается
                     closeQuietly(key);
                 }
             }
@@ -74,6 +78,7 @@ public final class NioKeyServer implements AutoCloseable {
         }
     }
 
+    // Потокобезопасно: вызывается из shutdown hook, то есть из другой нити, не из run().
     public void shutdown() {
         running = false;
         selector.wakeup();
@@ -89,6 +94,7 @@ public final class NioKeyServer implements AutoCloseable {
         clientKey.attach(new ConnectionContext(client, clientKey));
     }
 
+    // Читаем то, что пришло прямо сейчас; имя клиента может доехать по кускам за несколько вызовов.
     private void handleRead(SelectionKey key) throws IOException {
         ConnectionContext ctx = (ConnectionContext) key.attachment();
         ByteBuffer readBuf = ByteBuffer.allocate(256);
@@ -103,11 +109,13 @@ public final class NioKeyServer implements AutoCloseable {
         readBuf.flip();
         String name = ctx.feedNameBytes(readBuf);
         if (name != null) {
-            key.interestOps(key.interestOps() & ~SelectionKey.OP_READ);
+            key.interestOps(key.interestOps() & ~SelectionKey.OP_READ); // один запрос на соединение, больше читать не ждём
             handleNameReceived(ctx, name);
         }
     }
 
+    // Отдаём имя в пул на генерацию. whenComplete ниже выполнится в генерирующей нити,
+    // а не в реакторе — поэтому только кладём результат в очередь и будим selector.
     private void handleNameReceived(ConnectionContext ctx, String name) {
         CompletableFuture<IssuedCredential> future = workerPool.resolve(name);
         future.whenComplete((credential, error) -> {
@@ -120,12 +128,13 @@ public final class NioKeyServer implements AutoCloseable {
         });
     }
 
+    // Выполняется только в нити реактора — поэтому ключи/каналы тут трогать безопасно.
     private void drainTransmitQueue() {
         ResponseTask task;
         while ((task = transmitQueue.poll()) != null) {
             ConnectionContext ctx = task.getConnection();
             if (!ctx.key.isValid()) {
-                continue;
+                continue; // клиент уже отвалился, пока мы генерировали ему ключ
             }
             byte[] payload = task.isSuccess()
                     ? Protocol.encodeSuccess(
@@ -144,9 +153,9 @@ public final class NioKeyServer implements AutoCloseable {
             key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
             return;
         }
-        ctx.channel.write(buf);
+        ctx.channel.write(buf); // неблокирующая запись, может уйти не весь буфер за раз
         if (!buf.hasRemaining()) {
-            closeQuietly(key);
+            closeQuietly(key); // всё отправили, этому клиенту мы больше ничего не должны
         }
     }
 
