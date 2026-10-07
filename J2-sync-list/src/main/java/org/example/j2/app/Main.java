@@ -26,7 +26,6 @@ public final class Main {
     }
 
     public static void main(String[] args) throws Exception {
-        // не зависим от кодировки терминала/системы — иначе русский текст может превратиться в "?????"
         System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
 
         Config config;
